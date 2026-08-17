@@ -134,7 +134,7 @@ public class EmailService {
                         <p>Nous avons le plaisir de vous informer que votre compte d'accès à la plateforme <strong>COMPULEC</strong> a été créé avec succès en tant que <strong>%s</strong>.</p>
                         
                         <div class="credentials-box">
-                            <div class="credentials-title">🔑 Vos identifiants de connexion :</div>
+                            <div class="credentials-title">Vos identifiants de connexion :</div>
                             <div class="credential-item"><strong>Email :</strong> %s</div>
                             <div class="credential-item"><strong>Mot de passe :</strong> %s</div>
                         </div>

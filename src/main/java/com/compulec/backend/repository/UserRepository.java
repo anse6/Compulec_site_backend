@@ -35,4 +35,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * Récupère tous les utilisateurs ayant un rôle spécifique (ex: MANAGER).
      */
     Page<User> findByRole(Role role, Pageable pageable);
+
+    /**
+     * Recherche un utilisateur par son code de réinitialisation de mot de passe.
+     */
+    Optional<User> findByResetPasswordCode(String resetPasswordCode);
 }

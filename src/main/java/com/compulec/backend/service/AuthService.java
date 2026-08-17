@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -139,52 +140,51 @@ public class AuthService {
     }
 
     /**
-     * Étape 2 : Vérifier le code de réinitialisation.
+     * Étape 2 : Vérifier le code de réinitialisation (recherche par code uniquement).
      */
-    @Transactional(readOnly = true)
-    public void verifyResetCode(VerifyCodeRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "email", request.getEmail()));
-
-        if (user.getResetPasswordCode() == null || !user.getResetPasswordCode().equals(request.getCode())) {
-            throw new IllegalArgumentException("Code de vérification incorrect");
-        }
+    @Transactional
+    public AuthResponse verifyResetCode(VerifyCodeRequest request) {
+        User user = userRepository.findByResetPasswordCode(request.getCode())
+                .orElseThrow(() -> new IllegalArgumentException("Code de vérification incorrect ou inexistant"));
 
         if (user.getResetPasswordCodeExpiresAt().isBefore(LocalDateTime.now())) {
             throw new IllegalArgumentException("Le code de vérification a expiré");
         }
+
+        // Générer un token temporaire pour que l'utilisateur puisse réinitialiser son mot de passe
+        String accessToken = jwtService.generateToken(user);
+        String refreshToken = saveRefreshToken(user);
+
+        log.info("Code de réinitialisation validé pour l'utilisateur : {}", user.getEmail());
+        return buildAuthResponse(accessToken, refreshToken, user);
     }
 
     /**
-     * Étape 3 : Réinitialiser le mot de passe après confirmation du code.
+     * Étape 3 : Réinitialiser le mot de passe après confirmation du code (via authentification).
      */
     @Transactional
-    public void resetPassword(ResetPasswordRequest request) {
+    public void resetPassword(ResetPasswordRequest request, UserDetails userDetails) {
+        if (userDetails == null) {
+            throw new IllegalArgumentException("Jeton de réinitialisation invalide ou expiré");
+        }
+
         if (!request.getNewPassword().equals(request.getConfirmNewPassword())) {
             throw new IllegalArgumentException("Le nouveau mot de passe et sa confirmation ne correspondent pas");
         }
 
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "email", request.getEmail()));
-
-        if (user.getResetPasswordCode() == null || !user.getResetPasswordCode().equals(request.getCode())) {
-            throw new IllegalArgumentException("Code de vérification incorrect");
-        }
-
-        if (user.getResetPasswordCodeExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new IllegalArgumentException("Le code de vérification a expiré");
-        }
+        User user = userRepository.findByEmail(userDetails.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "email", userDetails.getUsername()));
 
         // Mettre à jour le mot de passe
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         
-        // Vider les champs du code
+        // Vider les champs du code de réinitialisation
         user.setResetPasswordCode(null);
         user.setResetPasswordCodeExpiresAt(null);
         
         userRepository.save(user);
 
-        // Révoquer les tokens existants pour forcer la déconnexion sur tous les appareils
+        // Révoquer les tokens existants pour forcer la déconnexion
         refreshTokenRepository.revokeAllUserTokens(user);
         log.info("Mot de passe réinitialisé pour l'utilisateur : {}", user.getEmail());
     }

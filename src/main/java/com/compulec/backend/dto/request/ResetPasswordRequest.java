@@ -1,8 +1,6 @@
 package com.compulec.backend.dto.request;
 
-import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -10,21 +8,14 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * DTO pour réinitialiser le mot de passe avec le code de vérification.
+ * DTO pour réinitialiser le mot de passe (mot de passe et sa confirmation uniquement).
+ * L'identification de l'utilisateur se fait via le token JWT temporaire fourni dans le header d'autorisation.
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class ResetPasswordRequest {
-
-    @NotBlank(message = "L'email est obligatoire")
-    @Email(message = "Format d'email invalide")
-    private String email;
-
-    @NotBlank(message = "Le code de vérification est obligatoire")
-    @Pattern(regexp = "^[0-9]{6}$", message = "Le code doit contenir exactement 6 chiffres")
-    private String code;
 
     @NotBlank(message = "Le nouveau mot de passe est obligatoire")
     @Size(min = 8, message = "Le nouveau mot de passe doit contenir au moins 8 caractères")

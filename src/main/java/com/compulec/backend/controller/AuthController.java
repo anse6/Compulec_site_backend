@@ -72,11 +72,11 @@ public class AuthController {
      * POST /api/auth/verify-reset-code
      */
     @PostMapping("/verify-reset-code")
-    @Operation(summary = "Mot de passe oublié - Étape 2", description = "Vérifie la validité du code de réinitialisation reçu")
-    public ResponseEntity<ApiResponse<Void>> verifyResetCode(
+    @Operation(summary = "Mot de passe oublié - Étape 2", description = "Vérifie la validité du code de réinitialisation reçu et retourne un jeton temporaire")
+    public ResponseEntity<ApiResponse<AuthResponse>> verifyResetCode(
             @Valid @RequestBody VerifyCodeRequest request) {
-        authService.verifyResetCode(request);
-        return ResponseEntity.ok(ApiResponse.success(null, "Code de vérification validé. Vous pouvez réinitialiser votre mot de passe."));
+        AuthResponse response = authService.verifyResetCode(request);
+        return ResponseEntity.ok(ApiResponse.success(response, "Code de vérification validé. Jeton temporaire généré."));
     }
 
     /**
@@ -84,10 +84,12 @@ public class AuthController {
      * POST /api/auth/reset-password
      */
     @PostMapping("/reset-password")
-    @Operation(summary = "Mot de passe oublié - Étape 3", description = "Réinitialise le mot de passe après validation du code")
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
+    @Operation(summary = "Mot de passe oublié - Étape 3", description = "Réinitialise le mot de passe de l'utilisateur authentifié par le jeton temporaire")
     public ResponseEntity<ApiResponse<Void>> resetPassword(
-            @Valid @RequestBody ResetPasswordRequest request) {
-        authService.resetPassword(request);
+            @Valid @RequestBody ResetPasswordRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        authService.resetPassword(request, userDetails);
         return ResponseEntity.ok(ApiResponse.success(null, "Votre mot de passe a été réinitialisé avec succès !"));
     }
 
