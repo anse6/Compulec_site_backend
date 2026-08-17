@@ -4,12 +4,14 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 /**
  * Service d'envoi d'e-mails HTML responsives pour COMPULEC TECHNOVATION.
+ * Intègre le logo de l'entreprise et les liens vers les réseaux sociaux.
  */
 @Service
 @RequiredArgsConstructor
@@ -19,7 +21,7 @@ public class EmailService {
     private final JavaMailSender mailSender;
 
     /**
-     * Envoie un e-mail HTML responsive.
+     * Envoie un e-mail HTML responsive avec intégration du logo en inline (CID).
      */
     private void sendHtmlEmail(String to, String subject, String htmlContent) {
         try {
@@ -30,6 +32,14 @@ public class EmailService {
             helper.setSubject(subject);
             helper.setText(htmlContent, true);
             helper.setFrom("no-reply@compulec.com");
+
+            // Attacher le logo de l'entreprise en ligne (CID: logo) s'il existe dans les ressources
+            ClassPathResource logoResource = new ClassPathResource("static/images/logo.png");
+            if (logoResource.exists()) {
+                helper.addInline("logo", logoResource);
+            } else {
+                log.warn("Le logo de l'entreprise n'a pas été trouvé dans : src/main/resources/static/images/logo.png");
+            }
 
             mailSender.send(message);
             log.info("E-mail envoyé avec succès à : {}", to);
@@ -64,16 +74,14 @@ public class EmailService {
                     max-width: 600px; margin: 0 auto; background-color: #ffffff;
                     border-radius: 12px; overflow: hidden;
                     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                    border: 1px solid #e2e8f0;
                 }
                 .header {
-                    background: linear-gradient(135deg, #0f172a 0%%, #1e293b 100%%);
-                    padding: 40px 30px; text-align: center; border-bottom: 4px solid #2563eb;
+                    background-color: #ffffff;
+                    padding: 30px; text-align: center; border-bottom: 3px solid #2563eb;
                 }
-                .logo-title {
-                    color: #ffffff; font-size: 32px; font-weight: 800; letter-spacing: 2px; margin: 0;
-                }
-                .logo-subtitle {
-                    color: #94a3b8; font-size: 12px; font-weight: 600; letter-spacing: 5px; margin: 5px 0 0 0; text-transform: uppercase;
+                .logo-img {
+                    max-height: 80px; width: auto; display: block; margin: 0 auto;
                 }
                 .content {
                     padding: 40px 30px; color: #334155; line-height: 1.6;
@@ -97,11 +105,21 @@ public class EmailService {
                     border-radius: 8px; margin: 20px 0; text-align: center;
                 }
                 .footer {
-                    background-color: #f1f5f9; padding: 25px 30px; text-align: center;
+                    background-color: #f1f5f9; padding: 30px 20px; text-align: center;
                     border-top: 1px solid #e2e8f0; color: #64748b; font-size: 13px;
                 }
                 .footer-brand {
-                    font-weight: 700; color: #334155; margin-bottom: 5px;
+                    font-weight: 700; color: #334155; margin-bottom: 15px; font-size: 14px;
+                    letter-spacing: 1px;
+                }
+                .social-links {
+                    margin: 15px 0;
+                }
+                .social-icon {
+                    display: inline-block; margin: 0 8px; text-decoration: none; transition: transform 0.2s;
+                }
+                .social-icon img {
+                    width: 28px; height: 28px; border: none; vertical-align: middle;
                 }
             </style>
         </head>
@@ -109,12 +127,11 @@ public class EmailService {
             <div class="wrapper">
                 <div class="container">
                     <div class="header">
-                        <div class="logo-title">COMPULEC</div>
-                        <div class="logo-subtitle">TECHNOVATION</div>
+                        <img src="cid:logo" alt="COMPULEC TECHNOVATION" class="logo-img" />
                     </div>
                     <div class="content">
                         <p class="greeting">Bonjour %s %s,</p>
-                        <p>Nous avons le plaisir de vous informer que votre compte d'accès à la plateforme **COMPULEC** a été créé avec succès en tant que <strong>%s</strong>.</p>
+                        <p>Nous avons le plaisir de vous informer que votre compte d'accès à la plateforme <strong>COMPULEC</strong> a été créé avec succès en tant que <strong>%s</strong>.</p>
                         
                         <div class="credentials-box">
                             <div class="credentials-title">🔑 Vos identifiants de connexion :</div>
@@ -130,7 +147,23 @@ public class EmailService {
                     </div>
                     <div class="footer">
                         <div class="footer-brand">COMPULEC TECHNOVATION</div>
-                        <p>&copy; 2026 COMPULEC. Tous droits réservés.</p>
+                        
+                        <div class="social-links">
+                            <a href="https://www.facebook.com/share/19B4Vg2Dpi/" class="social-icon" target="_blank">
+                                <img src="https://img.icons8.com/color/32/facebook-new.png" alt="Facebook" />
+                            </a>
+                            <a href="https://www.instagram.com/compulectech?igsh=OXMzNDM5emx1a3Bk" class="social-icon" target="_blank">
+                                <img src="https://img.icons8.com/color/32/instagram-new.png" alt="Instagram" />
+                            </a>
+                            <a href="https://www.tiktok.com/@compulec?_r=1&_t=ZS-98xItroNjFs" class="social-icon" target="_blank">
+                                <img src="https://img.icons8.com/color/32/tiktok.png" alt="TikTok" />
+                            </a>
+                            <a href="https://x.com/CompulecTech" class="social-icon" target="_blank">
+                                <img src="https://img.icons8.com/color/32/twitterx--v2.png" alt="X (Twitter)" />
+                            </a>
+                        </div>
+                        
+                        <p style="margin: 15px 0 0 0; font-size: 12px; color: #94a3b8;">&copy; 2026 COMPULEC. Tous droits réservés.</p>
                     </div>
                 </div>
             </div>
@@ -166,16 +199,14 @@ public class EmailService {
                     max-width: 600px; margin: 0 auto; background-color: #ffffff;
                     border-radius: 12px; overflow: hidden;
                     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                    border: 1px solid #e2e8f0;
                 }
                 .header {
-                    background: linear-gradient(135deg, #0f172a 0%%, #1e293b 100%%);
-                    padding: 40px 30px; text-align: center; border-bottom: 4px solid #2563eb;
+                    background-color: #ffffff;
+                    padding: 30px; text-align: center; border-bottom: 3px solid #2563eb;
                 }
-                .logo-title {
-                    color: #ffffff; font-size: 32px; font-weight: 800; letter-spacing: 2px; margin: 0;
-                }
-                .logo-subtitle {
-                    color: #94a3b8; font-size: 12px; font-weight: 600; letter-spacing: 5px; margin: 5px 0 0 0; text-transform: uppercase;
+                .logo-img {
+                    max-height: 80px; width: auto; display: block; margin: 0 auto;
                 }
                 .content {
                     padding: 40px 30px; color: #334155; line-height: 1.6; text-align: center;
@@ -192,11 +223,21 @@ public class EmailService {
                     font-size: 14px; color: #64748b; margin-top: 20px; text-align: left;
                 }
                 .footer {
-                    background-color: #f1f5f9; padding: 25px 30px; text-align: center;
+                    background-color: #f1f5f9; padding: 30px 20px; text-align: center;
                     border-top: 1px solid #e2e8f0; color: #64748b; font-size: 13px;
                 }
                 .footer-brand {
-                    font-weight: 700; color: #334155; margin-bottom: 5px;
+                    font-weight: 700; color: #334155; margin-bottom: 15px; font-size: 14px;
+                    letter-spacing: 1px;
+                }
+                .social-links {
+                    margin: 15px 0;
+                }
+                .social-icon {
+                    display: inline-block; margin: 0 8px; text-decoration: none; transition: transform 0.2s;
+                }
+                .social-icon img {
+                    width: 28px; height: 28px; border: none; vertical-align: middle;
                 }
             </style>
         </head>
@@ -204,8 +245,7 @@ public class EmailService {
             <div class="wrapper">
                 <div class="container">
                     <div class="header">
-                        <div class="logo-title">COMPULEC</div>
-                        <div class="logo-subtitle">TECHNOVATION</div>
+                        <img src="cid:logo" alt="COMPULEC TECHNOVATION" class="logo-img" />
                     </div>
                     <div class="content">
                         <p class="greeting">Bonjour %s %s,</p>
@@ -219,7 +259,23 @@ public class EmailService {
                     </div>
                     <div class="footer">
                         <div class="footer-brand">COMPULEC TECHNOVATION</div>
-                        <p>&copy; 2026 COMPULEC. Tous droits réservés.</p>
+                        
+                        <div class="social-links">
+                            <a href="https://www.facebook.com/share/19B4Vg2Dpi/" class="social-icon" target="_blank">
+                                <img src="https://img.icons8.com/color/32/facebook-new.png" alt="Facebook" />
+                            </a>
+                            <a href="https://www.instagram.com/compulectech?igsh=OXMzNDM5emx1a3Bk" class="social-icon" target="_blank">
+                                <img src="https://img.icons8.com/color/32/instagram-new.png" alt="Instagram" />
+                            </a>
+                            <a href="https://www.tiktok.com/@compulec?_r=1&_t=ZS-98xItroNjFs" class="social-icon" target="_blank">
+                                <img src="https://img.icons8.com/color/32/tiktok.png" alt="TikTok" />
+                            </a>
+                            <a href="https://x.com/CompulecTech" class="social-icon" target="_blank">
+                                <img src="https://img.icons8.com/color/32/twitterx--v2.png" alt="X (Twitter)" />
+                            </a>
+                        </div>
+                        
+                        <p style="margin: 15px 0 0 0; font-size: 12px; color: #94a3b8;">&copy; 2026 COMPULEC. Tous droits réservés.</p>
                     </div>
                 </div>
             </div>
