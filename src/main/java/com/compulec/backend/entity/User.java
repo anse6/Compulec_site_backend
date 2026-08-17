@@ -6,13 +6,14 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
 /**
- * Entité représentant un utilisateur de l'application.
- * Implémente UserDetails pour l'intégration avec Spring Security.
+ * Entité représentant un utilisateur (Admin, Manager, User) de l'application.
+ * Implémente UserDetails pour Spring Security.
  */
 @Entity
 @Table(name = "users")
@@ -36,11 +37,21 @@ public class User implements UserDetails {
     @Column(name = "email", nullable = false, unique = true, length = 150)
     private String email;
 
+    @Column(name = "phone", nullable = false, length = 20)
+    private String phone;
+
+    @Column(name = "date_naissance", nullable = false)
+    private LocalDate dateNaissance;
+
+    @Column(name = "fonction", nullable = false, length = 100)
+    private String fonction;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "sexe", nullable = false, length = 10)
+    private Sexe sexe;
+
     @Column(name = "password", nullable = false)
     private String password;
-
-    @Column(name = "telephone", length = 20)
-    private String telephone;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false)
@@ -49,6 +60,13 @@ public class User implements UserDetails {
     @Column(name = "actif", nullable = false)
     @Builder.Default
     private boolean actif = true;
+
+    // Reset password code fields
+    @Column(name = "reset_password_code", length = 6)
+    private String resetPasswordCode;
+
+    @Column(name = "reset_password_code_expires_at")
+    private LocalDateTime resetPasswordCodeExpiresAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

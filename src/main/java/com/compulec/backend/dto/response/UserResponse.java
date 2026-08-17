@@ -1,11 +1,13 @@
 package com.compulec.backend.dto.response;
 
 import com.compulec.backend.entity.Role;
+import com.compulec.backend.entity.Sexe;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -22,7 +24,10 @@ public class UserResponse {
     private String nom;
     private String prenom;
     private String email;
-    private String telephone;
+    private String phone;
+    private LocalDate dateNaissance;
+    private String fonction;
+    private Sexe sexe;
     private Role role;
     private boolean actif;
     private LocalDateTime createdAt;

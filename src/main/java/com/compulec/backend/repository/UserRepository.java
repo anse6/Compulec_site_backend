@@ -1,6 +1,9 @@
 package com.compulec.backend.repository;
 
+import com.compulec.backend.entity.Role;
 import com.compulec.backend.entity.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -27,4 +30,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * @return true si l'email existe, false sinon
      */
     boolean existsByEmail(String email);
+
+    /**
+     * Récupère tous les utilisateurs ayant un rôle spécifique (ex: MANAGER).
+     */
+    Page<User> findByRole(Role role, Pageable pageable);
 }

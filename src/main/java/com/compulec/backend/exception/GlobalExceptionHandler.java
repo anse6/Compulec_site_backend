@@ -6,11 +6,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.time.format.DateTimeParseException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -37,6 +39,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .badRequest()
                 .body(ApiResponse.error("Données invalides", errors));
+    }
+
+    /**
+     * Gère la tentative de connexion d'un compte désactivé.
+     */
+    @ExceptionHandler(DisabledException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDisabledAccount(DisabledException ex) {
+        log.warn("Tentative de connexion sur un compte désactivé : {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error("Votre compte a été désactivé. Veuillez contacter un administrateur."));
     }
 
     /**
@@ -81,6 +94,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .badRequest()
                 .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * Gère les erreurs de format de date (400).
+     * Ex: champ "date" envoyé comme "string" au lieu de "2025-01-30".
+     */
+    @ExceptionHandler(DateTimeParseException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDateTimeParseException(DateTimeParseException ex) {
+        log.warn("Format de date invalide : {}", ex.getMessage());
+        return ResponseEntity
+                .badRequest()
+                .body(ApiResponse.error(
+                    "Format de date invalide. Veuillez utiliser le format ISO 8601 : YYYY-MM-DD (exemple : 2025-01-30)"
+                ));
     }
 
     /**
