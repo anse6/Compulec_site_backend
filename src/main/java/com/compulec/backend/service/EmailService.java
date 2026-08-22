@@ -20,6 +20,9 @@ public class EmailService {
 
     private final JavaMailSender mailSender;
 
+    @org.springframework.beans.factory.annotation.Value("${spring.mail.username}")
+    private String senderEmail;
+
     /**
      * Envoie un e-mail HTML responsive avec intégration du logo en inline (CID).
      */
@@ -31,7 +34,7 @@ public class EmailService {
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(htmlContent, true);
-            helper.setFrom("no-reply@compulec.com");
+            helper.setFrom(senderEmail);
 
             // Attacher le logo de l'entreprise en ligne (CID: logo) s'il existe dans les ressources
             ClassPathResource logoResource = new ClassPathResource("static/images/logo.png");
@@ -142,7 +145,7 @@ public class EmailService {
                         <p>Pour des raisons de sécurité, nous vous recommandons vivement de changer votre mot de passe dès votre première connexion.</p>
 
                         <div style="text-align: center;">
-                            <a href="http://localhost:8080/api/swagger-ui.html" class="button">Accéder à la plateforme</a>
+                            <a href="http://localhost:8080/api/swagger-ui.html" style="display: inline-block; padding: 14px 30px; background-color: #2563eb; color: #ffffff !important; text-decoration: none; font-weight: 600; border-radius: 8px; margin: 20px 0; text-align: center;">Accéder à la plateforme</a>
                         </div>
                     </div>
                     <div class="footer">
