@@ -1,9 +1,17 @@
 package com.compulec.backend.controller;
 
+import com.compulec.backend.dto.request.ChangePasswordRequest;
 import com.compulec.backend.dto.request.CreateManagerRequest;
 import com.compulec.backend.dto.response.ApiResponse;
+import com.compulec.backend.dto.response.AuthResponse;
+import com.compulec.backend.dto.response.ManagerCreatedResponse;
 import com.compulec.backend.dto.response.UserResponse;
+import com.compulec.backend.dto.request.MfaCodeRequest;
 import com.compulec.backend.entity.Role;
+import com.compulec.backend.entity.User;
+import com.compulec.backend.security.RefreshTokenCookie;
+import com.compulec.backend.service.AuthService;
+import com.compulec.backend.service.MfaService;
 import com.compulec.backend.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -13,12 +21,16 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * Contrôleur REST pour la gestion des utilisateurs et des managers ( réservé aux Administrateurs ).
@@ -31,6 +43,8 @@ import org.springframework.web.bind.annotation.*;
 public class UserController {
 
     private final UserService userService;
+    private final MfaService mfaService;
+    private final RefreshTokenCookie refreshTokenCookie;
 
     /**
      * Récupère le profil de l'utilisateur connecté (Admin ou Manager).
@@ -45,18 +59,38 @@ public class UserController {
     }
 
     /**
-     * Créer un compte Manager (Seul l'ADMIN a le droit, envoie un e-mail de bienvenue).
+     * Créer un compte Manager par invitation (Seul l'ADMIN a le droit).
      * POST /api/users/managers
+     *
+     * Le manager reçoit un lien par e-mail ; le code d'activation renvoyé ici
+     * (une seule fois) doit lui être transmis par un autre canal.
      */
     @PostMapping("/managers")
     @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "Créer un Manager", description = "Permet à l'Administrateur de créer un compte Manager (avec e-mail de bienvenue)")
-    public ResponseEntity<ApiResponse<UserResponse>> createManager(
+    @Operation(summary = "Inviter un Manager", description = "Crée un compte Manager inactif et lui envoie un lien d'invitation. "
+            + "La réponse contient le code d'activation à transmettre au manager de vive voix (il n'est affiché qu'une fois).")
+    public ResponseEntity<ApiResponse<ManagerCreatedResponse>> createManager(
             @Valid @RequestBody CreateManagerRequest request) {
-        UserResponse manager = userService.createManager(request);
+        ManagerCreatedResponse created = userService.createManager(request);
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(ApiResponse.success(manager, "Compte Manager créé avec succès ! Un e-mail de bienvenue a été envoyé."));
+                .body(ApiResponse.success(created, created.isEmailSent()
+                        ? "Invitation envoyée. Transmettez le code d'activation au manager."
+                        : "Compte créé, mais l'e-mail d'invitation n'a pas pu être envoyé. Utilisez « Renvoyer l'invitation »."));
+    }
+
+    /**
+     * Renvoyer une invitation (nouveau lien + nouveau code ; les anciens sont invalidés).
+     * POST /api/users/{id}/invitation
+     */
+    @PostMapping("/{id}/invitation")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Renvoyer l'invitation", description = "Génère un nouveau lien et un nouveau code d'activation pour un compte non encore activé")
+    public ResponseEntity<ApiResponse<ManagerCreatedResponse>> resendInvitation(@PathVariable Long id) {
+        ManagerCreatedResponse created = userService.resendInvitation(id);
+        return ResponseEntity.ok(ApiResponse.success(created, created.isEmailSent()
+                ? "Nouvelle invitation envoyée. Transmettez le nouveau code d'activation."
+                : "Nouveau code généré, mais l'e-mail n'a pas pu être envoyé."));
     }
 
     /**
@@ -174,4 +208,65 @@ public class UserController {
         userService.deleteUser(id);
         return ResponseEntity.ok(ApiResponse.success(null, "Compte supprimé avec succès"));
     }
+    /**
+     * Change le mot de passe de l'utilisateur connecté.
+     * PATCH /api/users/me/password
+     */
+    @PatchMapping("/me/password")
+    @Operation(summary = "Changer son mot de passe", description = "Permet à l'utilisateur connecté de changer son propre mot de passe en fournissant l'ancien et le nouveau")
+    public ResponseEntity<ApiResponse<AuthResponse>> changePassword(
+            @Valid @RequestBody ChangePasswordRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        UserResponse currentUser = userService.getUserByEmail(userDetails.getUsername());
+        AuthService.Session session = userService.changePassword(
+                currentUser.getId(),
+                request.getAncienMotDePasse(),
+                request.getNouveauMotDePasse(),
+                request.getConfirmNouveauMotDePasse()
+        );
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.create(session.refreshToken()))
+                .body(ApiResponse.success(session.response(),
+                        "Mot de passe modifié avec succès ! Vos autres sessions ont été déconnectées."));
+    }
+
+    /**
+     * État de la double authentification de l'utilisateur connecté.
+     * GET /api/users/me/mfa
+     */
+    @GetMapping("/me/mfa")
+    @Operation(summary = "État de ma 2FA", description = "2FA activée et nombre de codes de secours restants")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getMyMfaStatus(@AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(ApiResponse.success(Map.of(
+                "enabled", user.isMfaEnabled(),
+                "remainingBackupCodes", mfaService.remainingBackupCodes(user))));
+    }
+
+    /**
+     * Génère de nouveaux codes de secours (exige un code de l'application).
+     * POST /api/users/me/mfa/backup-codes
+     */
+    @PostMapping("/me/mfa/backup-codes")
+    @Operation(summary = "Nouveaux codes de secours", description = "Remplace les codes de secours ; les anciens ne fonctionnent plus")
+    public ResponseEntity<ApiResponse<List<String>>> regenerateBackupCodes(
+            @Valid @RequestBody MfaCodeRequest request,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(ApiResponse.success(
+                mfaService.regenerateBackupCodes(user, request.getCode()),
+                "Nouveaux codes de secours générés. Les anciens ne fonctionnent plus."));
+    }
+
+    /**
+     * Réinitialise la 2FA d'un utilisateur (téléphone perdu) — Admin seulement.
+     * PATCH /api/users/{id}/mfa/reset
+     */
+    @PatchMapping("/{id}/mfa/reset")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Réinitialiser la 2FA", description = "Supprime la 2FA d'un utilisateur et ferme ses sessions ; il devra la reconfigurer")
+    public ResponseEntity<ApiResponse<UserResponse>> resetMfa(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success(userService.resetMfa(id),
+                "Double authentification réinitialisée. L'utilisateur devra la reconfigurer à sa prochaine connexion."));
+    }
 }
+

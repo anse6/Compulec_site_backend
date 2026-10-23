@@ -61,12 +61,46 @@ public class User implements UserDetails {
     @Builder.Default
     private boolean actif = true;
 
-    // Reset password code fields
-    @Column(name = "reset_password_code", length = 6)
-    private String resetPasswordCode;
+    /** Date d'acceptation de l'invitation. null = invitation en attente (connexion impossible). */
+    @Column(name = "activated_at")
+    private LocalDateTime activatedAt;
 
-    @Column(name = "reset_password_code_expires_at")
-    private LocalDateTime resetPasswordCodeExpiresAt;
+    /**
+     * Version des jetons JWT. Incrémentée à chaque événement de sécurité
+     * (désactivation, changement / réinitialisation du mot de passe) :
+     * tous les access tokens émis avant deviennent immédiatement invalides.
+     */
+    @Column(name = "token_version", nullable = false, columnDefinition = "INT DEFAULT 0")
+    @Builder.Default
+    private int tokenVersion = 0;
+
+    /** Échecs de connexion consécutifs (remis à zéro après une connexion réussie). */
+    @Column(name = "failed_login_attempts", nullable = false, columnDefinition = "INT DEFAULT 0")
+    @Builder.Default
+    private int failedLoginAttempts = 0;
+
+    /** Compte verrouillé temporairement jusqu'à cette date après trop d'échecs. */
+    @Column(name = "locked_until")
+    private LocalDateTime lockedUntil;
+
+    // ===================== Double authentification (TOTP) =====================
+
+    /** 2FA activée (facultative) : si oui, chaque connexion exige un code de l'application. */
+    @Column(name = "mfa_enabled", nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
+    @Builder.Default
+    private boolean mfaEnabled = false;
+
+    /** Secret TOTP chiffré (AES-GCM, voir SecretCipher). */
+    @Column(name = "mfa_secret", length = 255)
+    private String mfaSecret;
+
+    /** Secret en cours d'enrôlement (pas encore confirmé par un premier code). */
+    @Column(name = "mfa_pending_secret", length = 255)
+    private String mfaPendingSecret;
+
+    /** Dernière période TOTP acceptée : un même code ne peut pas être rejoué. */
+    @Column(name = "mfa_last_used_step")
+    private Long mfaLastUsedStep;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -114,6 +148,11 @@ public class User implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return actif;
+        return actif && activatedAt != null;
+    }
+
+    /** Invalide immédiatement tous les access tokens existants de cet utilisateur. */
+    public void incrementTokenVersion() {
+        tokenVersion++;
     }
 }

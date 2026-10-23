@@ -30,6 +30,10 @@ public class UserResponse {
     private Sexe sexe;
     private Role role;
     private boolean actif;
+    /** true tant que le manager n'a pas accepté son invitation. */
+    private boolean pendingInvitation;
+    private LocalDateTime activatedAt;
+    private boolean mfaEnabled;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

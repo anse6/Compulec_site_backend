@@ -6,7 +6,6 @@ import com.compulec.backend.dto.response.ProjetResponse;
 import com.compulec.backend.service.ProjetService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -16,40 +15,25 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import com.compulec.backend.exception.ResourceNotFoundException;
+import com.compulec.backend.security.CurrentUser;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.List;
+
 
 /**
  * Contrôleur REST pour la gestion des Projets COMPULEC.
- *
- * IMPORTANT : le champ "date" doit être envoyé au format ISO 8601 : YYYY-MM-DD
- * Exemple : 2025-01-30
  */
 @RestController
-@RequestMapping("/api/projets")
+@RequestMapping("/projets")
 @RequiredArgsConstructor
 @Tag(name = "Projets", description = "Endpoints pour la gestion des projets COMPULEC")
 public class ProjetController {
 
     private final ProjetService projetService;
-
-    // ===================================================================
-    // Méthode utilitaire privée : parse la date avec un message clair
-    // ===================================================================
-    private LocalDate parseDate(String dateStr) {
-        try {
-            return LocalDate.parse(dateStr.trim());
-        } catch (DateTimeParseException ex) {
-            throw new IllegalArgumentException(
-                "Format de date invalide : '" + dateStr + "'. Veuillez utiliser le format ISO 8601 : YYYY-MM-DD (ex: 2025-01-30)"
-            );
-        }
-    }
 
     // ===================================================================
     // POST /api/projets — Créer un projet
@@ -63,33 +47,41 @@ public class ProjetController {
                           "**Format multipart/form-data**. Le champ `date` doit être au format `YYYY-MM-DD` (ex: `2025-01-30`)."
     )
     public ResponseEntity<ApiResponse<ProjetResponse>> createProjet(
-            @Parameter(description = "Titre du projet", required = true, example = "Projet Alpha")
-            @RequestPart("titre") String titre,
-
-            @Parameter(description = "Secteur d'activité", required = true, example = "Informatique")
-            @RequestPart("secteur") String secteur,
-
-            @Parameter(description = "Description détaillée du projet", required = true, example = "Description du projet...")
-            @RequestPart("description") String description,
-
-            @Parameter(description = "Date du projet au format YYYY-MM-DD", required = true,
-                       schema = @Schema(type = "string", format = "date", example = "2025-01-30"))
-            @RequestPart("date") String date,
-
-            @Parameter(description = "Localisation du projet", required = true, example = "Douala, Cameroun")
-            @RequestPart("localisation") String localisation,
-
-            @Parameter(description = "Images du projet (optionnel, plusieurs fichiers acceptés)")
-            @RequestPart(value = "images", required = false) List<MultipartFile> images
+            @Parameter(description = "Titre du projet", required = true) @RequestPart("titre") String titre,
+            @Parameter(description = "Sous-titre") @RequestPart(value = "sousTitre", required = false) String sousTitre,
+            @Parameter(description = "Catégorie", required = true) @RequestPart("categorie") String categorie,
+            @Parameter(description = "Service") @RequestPart(value = "service", required = false) String service,
+            @Parameter(description = "Nom du client") @RequestPart(value = "clientName", required = false) String clientName,
+            @Parameter(description = "Secteur", required = true) @RequestPart("secteur") String secteur,
+            @Parameter(description = "Localisation", required = true) @RequestPart("localisation") String localisation,
+            @Parameter(description = "Latitude GPS (carte)") @RequestPart(value = "latitude", required = false) String latitude,
+            @Parameter(description = "Longitude GPS (carte)") @RequestPart(value = "longitude", required = false) String longitude,
+            @Parameter(description = "Status") @RequestPart(value = "status", required = false) String status,
+            @Parameter(description = "Overview", required = true) @RequestPart("overview") String overview,
+            @Parameter(description = "Contexte", required = true) @RequestPart("contexte") String contexte,
+            @Parameter(description = "Besoins") @RequestParam(value = "besoins", required = false) List<String> besoins,
+            @Parameter(description = "Solution", required = true) @RequestPart("solution") String solution,
+            @Parameter(description = "Technologies") @RequestParam(value = "technologies", required = false) List<String> technologies,
+            @Parameter(description = "Résultat", required = true) @RequestPart("resultat") String resultat,
+            @Parameter(description = "Images du projet") @RequestPart(value = "images", required = false) List<MultipartFile> images
     ) {
-        LocalDate parsedDate = parseDate(date);
-
         ProjetRequest request = ProjetRequest.builder()
-                .titre(titre.trim())
-                .secteur(secteur.trim())
-                .description(description.trim())
-                .date(parsedDate)
-                .localisation(localisation.trim())
+                .titre(titre != null ? titre.trim() : null)
+                .sousTitre(sousTitre != null ? sousTitre.trim() : null)
+                .categorie(categorie != null ? categorie.trim() : null)
+                .service(service != null ? service.trim() : null)
+                .clientName(clientName != null ? clientName.trim() : null)
+                .secteur(secteur != null ? secteur.trim() : null)
+                .localisation(localisation != null ? localisation.trim() : null)
+                .latitude(parseCoordinate(latitude, 90))
+                .longitude(parseCoordinate(longitude, 180))
+                .status(status != null ? status.trim() : null)
+                .overview(overview != null ? overview.trim() : null)
+                .contexte(contexte != null ? contexte.trim() : null)
+                .besoins(besoins)
+                .solution(solution != null ? solution.trim() : null)
+                .technologies(technologies)
+                .resultat(resultat != null ? resultat.trim() : null)
                 .build();
 
         ProjetResponse projet = projetService.createProjet(request, images);
@@ -99,13 +91,12 @@ public class ProjetController {
     }
 
     // ===================================================================
-    // GET /api/projets — Liste de tous les projets (Admin / Manager)
+    // GET /api/projets — Liste de tous les projets
     // ===================================================================
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @SecurityRequirement(name = "bearerAuth")
     @Operation(summary = "Liste de tous les projets",
-               description = "Récupère tous les projets (publiés et non publiés). Réservé aux Admin et Managers.")
+               description = "Récupère tous les projets (publiés et non publiés). Réservé aux ADMIN / MANAGER.")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
     public ResponseEntity<ApiResponse<Page<ProjetResponse>>> getAllProjets(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
@@ -136,9 +127,12 @@ public class ProjetController {
     // ===================================================================
     @GetMapping("/{id}")
     @Operation(summary = "Détail d'un projet",
-               description = "Récupère les informations détaillées d'un projet par son ID.")
+               description = "Récupère un projet par son ID. Un brouillon n'est visible que par un ADMIN ou MANAGER connecté.")
     public ResponseEntity<ApiResponse<ProjetResponse>> getProjetById(@PathVariable Long id) {
         ProjetResponse projet = projetService.getProjetById(id);
+        if (!projet.isPublie() && !CurrentUser.isStaff()) {
+            throw new ResourceNotFoundException("Projet", "id", id);
+        }
         return ResponseEntity.ok(ApiResponse.success(projet));
     }
 
@@ -154,34 +148,41 @@ public class ProjetController {
                              "Les nouvelles images envoyées remplacent les anciennes.")
     public ResponseEntity<ApiResponse<ProjetResponse>> updateProjet(
             @PathVariable Long id,
-
-            @Parameter(description = "Titre du projet", required = true, example = "Projet Alpha")
-            @RequestPart("titre") String titre,
-
-            @Parameter(description = "Secteur d'activité", required = true, example = "Informatique")
-            @RequestPart("secteur") String secteur,
-
-            @Parameter(description = "Description détaillée du projet", required = true, example = "Description du projet...")
-            @RequestPart("description") String description,
-
-            @Parameter(description = "Date du projet au format YYYY-MM-DD", required = true,
-                       schema = @Schema(type = "string", format = "date", example = "2025-01-30"))
-            @RequestPart("date") String date,
-
-            @Parameter(description = "Localisation du projet", required = true, example = "Douala, Cameroun")
-            @RequestPart("localisation") String localisation,
-
-            @Parameter(description = "Images du projet (optionnel)")
-            @RequestPart(value = "images", required = false) List<MultipartFile> images
+            @Parameter(description = "Titre du projet", required = true) @RequestPart("titre") String titre,
+            @Parameter(description = "Sous-titre") @RequestPart(value = "sousTitre", required = false) String sousTitre,
+            @Parameter(description = "Catégorie", required = true) @RequestPart("categorie") String categorie,
+            @Parameter(description = "Service") @RequestPart(value = "service", required = false) String service,
+            @Parameter(description = "Nom du client") @RequestPart(value = "clientName", required = false) String clientName,
+            @Parameter(description = "Secteur", required = true) @RequestPart("secteur") String secteur,
+            @Parameter(description = "Localisation", required = true) @RequestPart("localisation") String localisation,
+            @Parameter(description = "Latitude GPS (carte)") @RequestPart(value = "latitude", required = false) String latitude,
+            @Parameter(description = "Longitude GPS (carte)") @RequestPart(value = "longitude", required = false) String longitude,
+            @Parameter(description = "Status") @RequestPart(value = "status", required = false) String status,
+            @Parameter(description = "Overview", required = true) @RequestPart("overview") String overview,
+            @Parameter(description = "Contexte", required = true) @RequestPart("contexte") String contexte,
+            @Parameter(description = "Besoins") @RequestParam(value = "besoins", required = false) List<String> besoins,
+            @Parameter(description = "Solution", required = true) @RequestPart("solution") String solution,
+            @Parameter(description = "Technologies") @RequestParam(value = "technologies", required = false) List<String> technologies,
+            @Parameter(description = "Résultat", required = true) @RequestPart("resultat") String resultat,
+            @Parameter(description = "Images du projet") @RequestPart(value = "images", required = false) List<MultipartFile> images
     ) {
-        LocalDate parsedDate = parseDate(date);
-
         ProjetRequest request = ProjetRequest.builder()
-                .titre(titre.trim())
-                .secteur(secteur.trim())
-                .description(description.trim())
-                .date(parsedDate)
-                .localisation(localisation.trim())
+                .titre(titre != null ? titre.trim() : null)
+                .sousTitre(sousTitre != null ? sousTitre.trim() : null)
+                .categorie(categorie != null ? categorie.trim() : null)
+                .service(service != null ? service.trim() : null)
+                .clientName(clientName != null ? clientName.trim() : null)
+                .secteur(secteur != null ? secteur.trim() : null)
+                .localisation(localisation != null ? localisation.trim() : null)
+                .latitude(parseCoordinate(latitude, 90))
+                .longitude(parseCoordinate(longitude, 180))
+                .status(status != null ? status.trim() : null)
+                .overview(overview != null ? overview.trim() : null)
+                .contexte(contexte != null ? contexte.trim() : null)
+                .besoins(besoins)
+                .solution(solution != null ? solution.trim() : null)
+                .technologies(technologies)
+                .resultat(resultat != null ? resultat.trim() : null)
                 .build();
 
         ProjetResponse projet = projetService.updateProjet(id, request, images);
@@ -225,5 +226,23 @@ public class ProjetController {
     public ResponseEntity<ApiResponse<Void>> deleteProjet(@PathVariable Long id) {
         projetService.deleteProjet(id);
         return ResponseEntity.ok(ApiResponse.success(null, "Projet supprimé avec succès."));
+    }
+
+    /**
+     * Coordonnée GPS facultative : vide → null ; hors bornes ou invalide → 400.
+     */
+    private static Double parseCoordinate(String raw, double max) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            double value = Double.parseDouble(raw.trim());
+            if (Double.isNaN(value) || Math.abs(value) > max) {
+                throw new IllegalArgumentException("Coordonnée GPS hors limites : " + raw);
+            }
+            return value;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Coordonnée GPS invalide : " + raw);
+        }
     }
 }

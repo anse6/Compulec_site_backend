@@ -18,8 +18,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
         Path uploadDir = Paths.get("uploads");
         String uploadPath = uploadDir.toFile().getAbsolutePath();
         
-        // Permet d'exposer les fichiers du dossier uploads sur l'URL /api/uploads/**
-        registry.addResourceHandler("/api/uploads/**")
+        // Expose les fichiers du dossier uploads sur /uploads/** (context-path /api est déjà ajouté par Spring)
+        registry.addResourceHandler("/uploads/**")
                 .addResourceLocations("file:" + uploadPath + "/");
     }
 }

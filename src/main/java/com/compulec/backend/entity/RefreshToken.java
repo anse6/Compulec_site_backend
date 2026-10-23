@@ -6,7 +6,10 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 /**
- * Entité pour stocker les tokens de refresh JWT en base de données.
+ * Refresh token (jeton opaque transmis dans un cookie HttpOnly).
+ * Seule son empreinte SHA-256 est stockée dans la colonne "token".
+ * Rotation : à chaque utilisation il est révoqué et remplacé (replacedAt) ;
+ * présenter un jeton déjà remplacé = vol probable → toute la session est révoquée.
  */
 @Entity
 @Table(name = "refresh_tokens")
@@ -37,6 +40,9 @@ public class RefreshToken {
 
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
+
+    @Column(name = "replaced_at")
+    private LocalDateTime replacedAt;
 
     @PrePersist
     protected void onCreate() {

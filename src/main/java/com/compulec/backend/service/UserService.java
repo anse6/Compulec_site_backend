@@ -1,12 +1,20 @@
 package com.compulec.backend.service;
 
 import com.compulec.backend.dto.request.CreateManagerRequest;
+import com.compulec.backend.dto.response.ManagerCreatedResponse;
 import com.compulec.backend.dto.response.UserResponse;
+import com.compulec.backend.entity.AccountTokenType;
 import com.compulec.backend.entity.Role;
 import com.compulec.backend.entity.Sexe;
 import com.compulec.backend.entity.User;
 import com.compulec.backend.exception.ResourceNotFoundException;
+import com.compulec.backend.repository.AccountTokenRepository;
+import com.compulec.backend.repository.ChatMessageRepository;
+import com.compulec.backend.repository.ChatSessionRepository;
+import com.compulec.backend.repository.MfaBackupCodeRepository;
 import com.compulec.backend.repository.RefreshTokenRepository;
+import com.compulec.backend.security.PasswordPolicy;
+import com.compulec.backend.security.SecureTokenGenerator;
 import com.compulec.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,7 +24,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 
 /**
  * Service de gestion des utilisateurs et des managers par l'Administrateur.
@@ -30,44 +37,56 @@ public class UserService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
+    private final InvitationService invitationService;
+    private final AuthService authService;
+    private final AccountTokenRepository accountTokenRepository;
+    private final SecureTokenGenerator tokenGenerator;
+    private final MfaService mfaService;
+    private final MfaBackupCodeRepository mfaBackupCodeRepository;
+    private final ChatSessionRepository chatSessionRepository;
+    private final ChatMessageRepository chatMessageRepository;
 
     /**
-     * Permet à un Administrateur de créer un compte Manager et lui envoyer un e-mail.
+     * Permet à un Administrateur de créer un compte Manager.
+     *
+     * Le compte est créé INACTIF, avec un mot de passe aléatoire que personne ne connaît.
+     * Le manager reçoit un lien d'invitation par e-mail et doit saisir le code
+     * d'activation que l'admin lui transmet par un autre canal (voir InvitationService).
      */
     @Transactional
-    public UserResponse createManager(CreateManagerRequest request) {
-        if (!request.getPassword().equals(request.getConfirmPassword())) {
-            throw new IllegalArgumentException("Le mot de passe et sa confirmation ne correspondent pas");
-        }
-
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new IllegalArgumentException("Un compte avec cet email existe déjà : " + request.getEmail());
+    public ManagerCreatedResponse createManager(CreateManagerRequest request) {
+        String email = request.getEmail().trim();
+        if (userRepository.existsByEmail(email)) {
+            throw new IllegalArgumentException("Un compte avec cet email existe déjà : " + email);
         }
 
         User manager = User.builder()
-                .nom(request.getNom())
-                .prenom(request.getPrenom())
-                .email(request.getEmail())
+                .nom(request.getNom().trim())
+                .prenom(request.getPrenom().trim())
+                .email(email)
                 .phone(request.getPhone())
                 .dateNaissance(request.getDateNaissance())
-                .fonction(request.getFonction())
+                .fonction(request.getFonction().trim())
                 .sexe(request.getSexe())
-                .password(passwordEncoder.encode(request.getPassword()))
+                .password(passwordEncoder.encode(tokenGenerator.newToken()))
                 .role(Role.MANAGER)
-                .actif(true)
+                .actif(false)
                 .build();
 
         manager = userRepository.save(manager);
-        log.info("Manager créé par l'Admin avec l'email : {}", manager.getEmail());
+        log.info("Manager {} créé par un administrateur (invitation en attente)", manager.getId());
 
-        // Envoi de l'e-mail de bienvenue au Manager
-        try {
-            emailService.sendWelcomeEmail(manager.getEmail(), manager.getNom(), manager.getPrenom(), request.getPassword(), "Manager");
-        } catch (Exception e) {
-            log.error("Erreur lors de l'envoi de l'e-mail de bienvenue au manager {} : {}", manager.getEmail(), e.getMessage());
-        }
+        return invitationService.issueInvitation(manager);
+    }
 
-        return AuthService.mapToUserResponse(manager);
+    /**
+     * Renvoie une invitation (nouveau lien + nouveau code) à un compte non encore activé.
+     */
+    @Transactional
+    public ManagerCreatedResponse resendInvitation(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", id));
+        return invitationService.issueInvitation(user);
     }
 
     /**
@@ -153,9 +172,13 @@ public class UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", id));
 
+        if (user.getActivatedAt() == null) {
+            throw new IllegalArgumentException(
+                    "Ce compte n'a pas encore accepté son invitation : renvoyez-lui une invitation au lieu de l'activer.");
+        }
         user.setActif(true);
         user = userRepository.save(user);
-        log.info("Compte utilisateur réactivé : {}", user.getEmail());
+        log.info("Compte utilisateur réactivé : {}", user.getId());
         return AuthService.mapToUserResponse(user);
     }
 
@@ -169,7 +192,10 @@ public class UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", id));
 
         user.setActif(false);
+        user.incrementTokenVersion();          // coupe immédiatement tous les access tokens
         refreshTokenRepository.revokeAllUserTokens(user);
+        accountTokenRepository.revokeAll(user, AccountTokenType.INVITATION);
+        accountTokenRepository.revokeAll(user, AccountTokenType.PASSWORD_RESET);
         user = userRepository.save(user);
         log.info("Compte utilisateur désactivé : {}", user.getEmail());
         return AuthService.mapToUserResponse(user);
@@ -177,34 +203,66 @@ public class UserService {
 
     /**
      * Supprime définitivement un utilisateur.
+     * Les tokens de rafraîchissement liés sont d'abord supprimés pour éviter
+     * la violation de contrainte de clé étrangère (FK refresh_tokens → users).
      */
     @Transactional
     public void deleteUser(Long id) {
-        if (!userRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Utilisateur", "id", id);
-        }
-        userRepository.deleteById(id);
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", id));
+
+        // 1. Supprimer physiquement tous les jetons de cet utilisateur
+        refreshTokenRepository.deleteAllByUser(user);
+        accountTokenRepository.deleteAllByUser(user);
+        mfaBackupCodeRepository.deleteAllByUser(user);
+        // Conversations et réponses de chat : on les garde, sans lien vers le compte supprimé
+        chatSessionRepository.clearAssignedAdmin(user);
+        chatMessageRepository.clearAuthor(user);
+
+        // 2. Supprimer l'utilisateur
+        userRepository.delete(user);
         log.info("Utilisateur supprimé avec l'ID : {}", id);
     }
 
     /**
-     * Change le mot de passe d'un utilisateur.
+     * Réinitialise la double authentification d'un utilisateur (téléphone perdu).
      */
     @Transactional
-    public void changePassword(Long id, String ancienMotDePasse, String nouveauMotDePasse, String confirmNouveauMotDePasse) {
-        if (!nouveauMotDePasse.equals(confirmNouveauMotDePasse)) {
-            throw new IllegalArgumentException("Le nouveau mot de passe et sa confirmation ne correspondent pas");
-        }
+    public UserResponse resetMfa(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", id));
+        mfaService.reset(user);
+        return AuthService.mapToUserResponse(user);
+    }
 
+    /**
+     * Change le mot de passe de l'utilisateur connecté.
+     * Toutes les autres sessions sont fermées ; une nouvelle session est renvoyée
+     * pour que l'utilisateur reste connecté sur l'appareil courant.
+     */
+    @Transactional
+    public AuthService.Session changePassword(Long id, String ancienMotDePasse, String nouveauMotDePasse, String confirmNouveauMotDePasse) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", id));
 
         if (!passwordEncoder.matches(ancienMotDePasse, user.getPassword())) {
             throw new IllegalArgumentException("L'ancien mot de passe est incorrect");
         }
+        if (passwordEncoder.matches(nouveauMotDePasse, user.getPassword())) {
+            throw new IllegalArgumentException("Le nouveau mot de passe doit être différent de l'ancien");
+        }
+        PasswordPolicy.validate(nouveauMotDePasse, confirmNouveauMotDePasse, user);
 
         user.setPassword(passwordEncoder.encode(nouveauMotDePasse));
-        userRepository.save(user);
-        log.info("Mot de passe changé avec succès pour : {}", user.getEmail());
+        user.incrementTokenVersion();
+        user = userRepository.save(user);
+        log.info("Mot de passe changé pour l'utilisateur {}", user.getId());
+
+        try {
+            emailService.sendPasswordChangedEmail(user);
+        } catch (Exception e) {
+            log.error("Échec de l'envoi de l'alerte de changement de mot de passe à {} : {}", user.getId(), e.getMessage());
+        }
+        return authService.startSession(user);
     }
 }

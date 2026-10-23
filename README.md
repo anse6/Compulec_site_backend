@@ -22,18 +22,44 @@ API REST construite avec **Spring Boot 4**, **Spring Security**, **JWT** et **My
 
 ## 🔐 Règles de Gestion des Comptes
 
-1. **Inscription Administrateur (`POST /api/auth/register`)** :
-   - Inscription libre d'un compte **ADMIN**.
-   - Nécessite `password` et `confirmPassword` identiques.
+1. **Premier administrateur** : il n'y a plus d'inscription publique. Au démarrage, si aucun ADMIN
+   n'existe, il est créé à partir de `app.bootstrap.admin.email` / `app.bootstrap.admin.password`
+   dans `config/secrets.properties` (supprimez ensuite le mot de passe du fichier).
 
-2. **Création d'un Manager (`POST /api/users/managers`)** :
-   - **Seul un ADMIN connecté** peut créer un compte Manager.
-   - Les Managers ne peuvent pas s'inscrire eux-mêmes via `/auth/register`.
+2. **Invitation d'un Manager (`POST /api/users/managers`)** — réservé à un ADMIN :
+   - Le compte est créé **inactif, sans mot de passe connu**.
+   - Le manager reçoit par e-mail un **lien à usage unique** (24 h).
+   - L'admin reçoit un **code à 6 chiffres affiché une seule fois**, à transmettre de vive voix.
+   - Le manager active son compte avec le lien **et** le code (5 essais max), et choisit lui-même son mot de passe.
+   - `POST /api/users/{id}/invitation` renvoie un nouveau lien et un nouveau code.
 
 3. **Gestion & Désactivation (`PATCH /api/users/{id}/deactivate` & `activate`)** :
    - Un Admin peut **désactiver** ou **réactiver** un Manager/Utilisateur.
    - Dès qu'un compte est désactivé (`actif = false`), tous ses tokens sont révoqués et toute tentative de connexion échoue avec le message :
      > `"Votre compte a été désactivé. Veuillez contacter un administrateur."`
+
+4. **Double authentification obligatoire (TOTP)** pour tous les comptes :
+   - À la première connexion, l'utilisateur scanne un QR code (Google Authenticator, Microsoft Authenticator…).
+   - 10 codes de secours à usage unique sont donnés à l'activation.
+   - Téléphone perdu : un ADMIN utilise `PATCH /api/users/{id}/mfa/reset`.
+   - Le secret 2FA est chiffré en base avec `app.security.encryption-key` (ne jamais changer cette clé).
+
+5. **Sessions** : access token de 15 min en mémoire côté navigateur ; refresh token rotatif dans un cookie
+   `HttpOnly; SameSite=Strict` (`app.cookie.secure=true` en HTTPS). Ouvrez le site avec le **même hôte**
+   que `VITE_API_URL` (ex. tout en `192.168.1.193`, ou tout en `localhost`), sinon le cookie n'est pas envoyé.
+
+6. **Limitation de débit** par IP (429) sur la connexion, la 2FA, les liens et les formulaires publics.
+
+7. **Chat du site**
+   - **Assistant IA** (Claude, modèle `claude-opus-5-5`) : répond à partir de
+     `src/main/resources/chatbot/knowledge.md` (modifiable à la main), dans la langue du visiteur,
+     et propose un conseiller quand c'est utile. Clé : `anthropic.api-key` dans `config/secrets.properties`.
+     Sans clé, réponses par mots-clés. Plafond : `app.ai.max-replies-per-session` réponses IA par conversation.
+   - **Temps réel** (Server-Sent Events) : `GET /api/chat/stream/{session}` (visiteur) et
+     `GET /api/chat/admin/stream` (équipe, avec son et notifications du bureau).
+   - **Maintenance automatique** (`app.chat.*`) : relance de l'équipe après 15 min sans prise en charge,
+     fermeture des conversations inactives (24 h avec le bot, 48 h avec l'équipe), transcription envoyée
+     au visiteur, demande jamais traitée copiée dans « Messages », purge après 365 jours.
 
 ---
 
@@ -43,10 +69,16 @@ API REST construite avec **Spring Boot 4**, **Spring Security**, **JWT** et **My
 
 | Méthode | Route | Rôle requis | Description |
 |---------|-------|-------------|-------------|
-| `POST` | `/api/auth/register` | Public | Inscription d'un Administrateur |
-| `POST` | `/api/auth/login` | Public | Connexion Admin ou Manager |
-| `POST` | `/api/auth/refresh-token` | Public | Renouveler l'access token |
-| `POST` | `/api/auth/logout` | Authentifié | Déconnexion (révocation tokens) |
+| `POST` | `/api/auth/login` | Public | Étape 1 : mot de passe → `mfa_token` (verrouillage 15 min après 5 échecs) |
+| `POST` | `/api/auth/mfa/verify` | Public (mfa_token) | Étape 2 : code de l'application ou code de secours → session |
+| `POST` | `/api/auth/mfa/setup` | Public (mfa_token) | Première connexion : QR code de la 2FA |
+| `POST` | `/api/auth/mfa/setup/confirm` | Public (mfa_token) | Active la 2FA, ouvre la session, renvoie 10 codes de secours |
+| `POST` | `/api/auth/invitations/preview` | Public | Vérifier un lien d'invitation |
+| `POST` | `/api/auth/invitations/accept` | Public | Activer son compte (lien + code + mot de passe) |
+| `POST` | `/api/auth/forgot-password` | Public | Recevoir un lien de réinitialisation (30 min) |
+| `POST` | `/api/auth/reset-password` | Public | Nouveau mot de passe via le lien |
+| `POST` | `/api/auth/refresh-token` | Cookie HttpOnly | Nouvel access token (rotation du refresh token) |
+| `POST` | `/api/auth/logout` | Cookie HttpOnly | Déconnexion (révocation + suppression du cookie) |
 
 ### Gestion des Utilisateurs & Managers (`/api/users`)
 
@@ -72,7 +104,9 @@ sudo /opt/lampp/lampp startmysql
 # 2. Se rendre dans le dossier
 cd ~/Bureau/compulec/compulec_site/compulec_backend
 
-# 3. Lancer l'application
+# 3. Vérifier que config/secrets.properties existe (voir config/secrets.properties.example)
+
+# 4. Lancer l'application
 ./mvnw spring-boot:run
 ```
 

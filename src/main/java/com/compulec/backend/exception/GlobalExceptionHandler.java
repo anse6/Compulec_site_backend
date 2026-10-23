@@ -2,15 +2,18 @@ package com.compulec.backend.exception;
 
 import com.compulec.backend.dto.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.core.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.time.format.DateTimeParseException;
 import java.util.HashMap;
@@ -46,10 +49,21 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(DisabledException.class)
     public ResponseEntity<ApiResponse<Void>> handleDisabledAccount(DisabledException ex) {
-        log.warn("Tentative de connexion sur un compte désactivé : {}", ex.getMessage());
+        log.warn("Tentative de connexion sur un compte inactif : {}", ex.getMessage());
         return ResponseEntity
                 .status(HttpStatus.FORBIDDEN)
-                .body(ApiResponse.error("Votre compte a été désactivé. Veuillez contacter un administrateur."));
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * Gère le verrouillage temporaire après trop d'échecs de connexion (423).
+     */
+    @ExceptionHandler(LockedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleLockedAccount(LockedException ex) {
+        log.warn("Tentative de connexion sur un compte verrouillé");
+        return ResponseEntity
+                .status(HttpStatus.LOCKED)
+                .body(ApiResponse.error(ex.getMessage()));
     }
 
     /**
@@ -82,7 +96,37 @@ public class GlobalExceptionHandler {
         log.warn("Identifiants incorrects : {}", ex.getMessage());
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
-                .body(ApiResponse.error("Email ou mot de passe incorrect"));
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * Session expirée, révoquée ou étape 2FA expirée (401).
+     */
+    @ExceptionHandler(SessionExpiredException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSessionExpired(SessionExpiredException ex) {
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * Tri sur un champ inexistant (?sort=...) (400).
+     */
+    @ExceptionHandler(PropertyReferenceException.class)
+    public ResponseEntity<ApiResponse<Void>> handleBadSort(PropertyReferenceException ex) {
+        return ResponseEntity
+                .badRequest()
+                .body(ApiResponse.error("Paramètre de tri invalide"));
+    }
+
+    /**
+     * Fichier trop volumineux (413).
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUpload(MaxUploadSizeExceededException ex) {
+        return ResponseEntity
+                .status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(ApiResponse.error("Fichier trop volumineux (10 Mo maximum par image)"));
     }
 
     /**
@@ -93,6 +137,17 @@ public class GlobalExceptionHandler {
         log.warn("Argument illégal : {}", ex.getMessage());
         return ResponseEntity
                 .badRequest()
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * Action impossible dans l'état actuel (ex. répondre à une conversation fermée) (409).
+     */
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConflict(ConflictException ex) {
+        log.warn("Action refusée : {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
                 .body(ApiResponse.error(ex.getMessage()));
     }
 

@@ -18,7 +18,9 @@ public class ContactResponse {
 
     private Long id;
     private String nom;
+    private String entreprise;
     private String email;
+    private String telephone;
     private String objet;
     private String message;
     private boolean lu;

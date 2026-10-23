@@ -15,6 +15,7 @@ import java.time.LocalDate;
 
 /**
  * DTO pour la création d'un compte Manager par un Administrateur.
+ * Aucun mot de passe : le manager choisit le sien en acceptant son invitation.
  */
 @Data
 @Builder
@@ -48,10 +49,4 @@ public class CreateManagerRequest {
     @NotNull(message = "Le sexe est obligatoire")
     private Sexe sexe;
 
-    @NotBlank(message = "Le mot de passe est obligatoire")
-    @Size(min = 8, message = "Le mot de passe doit contenir au moins 8 caractères")
-    private String password;
-
-    @NotBlank(message = "La confirmation du mot de passe est obligatoire")
-    private String confirmPassword;
 }

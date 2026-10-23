@@ -21,11 +21,20 @@ public class Contact {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** Nom complet de l'expéditeur */
     @Column(name = "nom", nullable = false, length = 100)
     private String nom;
 
+    /** Entreprise / Organisation (optionnel) */
+    @Column(name = "entreprise", length = 150)
+    private String entreprise;
+
     @Column(name = "email", nullable = false, length = 150)
     private String email;
+
+    /** Numéro de téléphone */
+    @Column(name = "telephone", length = 30)
+    private String telephone;
 
     @Column(name = "objet", nullable = false, length = 200)
     private String objet;

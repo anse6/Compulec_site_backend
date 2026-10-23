@@ -29,7 +29,9 @@ public class ContactService {
     public ContactResponse createContact(ContactRequest request) {
         Contact contact = Contact.builder()
                 .nom(request.getNom().trim())
+                .entreprise(request.getEntreprise() != null ? request.getEntreprise().trim() : null)
                 .email(request.getEmail().trim().toLowerCase())
+                .telephone(request.getTelephone().trim())
                 .objet(request.getObjet().trim())
                 .message(request.getMessage().trim())
                 .lu(false)
@@ -101,7 +103,9 @@ public class ContactService {
                 .orElseThrow(() -> new ResourceNotFoundException("Message de contact", "id", id));
 
         contact.setNom(request.getNom().trim());
+        contact.setEntreprise(request.getEntreprise() != null ? request.getEntreprise().trim() : null);
         contact.setEmail(request.getEmail().trim().toLowerCase());
+        contact.setTelephone(request.getTelephone().trim());
         contact.setObjet(request.getObjet().trim());
         contact.setMessage(request.getMessage().trim());
 
@@ -123,13 +127,15 @@ public class ContactService {
     }
 
     // =====================================================================
-    // Méthode privée : mapper Contact -> ContactResponse
+    // Mapper Contact -> ContactResponse (réutilisé par DashboardService)
     // =====================================================================
-    private ContactResponse mapToResponse(Contact contact) {
+    ContactResponse mapToResponse(Contact contact) {
         return ContactResponse.builder()
                 .id(contact.getId())
                 .nom(contact.getNom())
+                .entreprise(contact.getEntreprise())
                 .email(contact.getEmail())
+                .telephone(contact.getTelephone())
                 .objet(contact.getObjet())
                 .message(contact.getMessage())
                 .lu(contact.isLu())

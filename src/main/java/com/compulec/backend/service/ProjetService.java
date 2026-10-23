@@ -52,10 +52,21 @@ public class ProjetService {
 
         Projet projet = Projet.builder()
                 .titre(request.getTitre())
+                .sousTitre(request.getSousTitre())
+                .categorie(request.getCategorie())
+                .service(request.getService())
+                .clientName(request.getClientName())
                 .secteur(request.getSecteur())
-                .description(request.getDescription())
-                .date(request.getDate())
                 .localisation(request.getLocalisation())
+                .latitude(request.getLatitude())
+                .longitude(request.getLongitude())
+                .status(request.getStatus())
+                .overview(request.getOverview())
+                .contexte(request.getContexte())
+                .besoins(request.getBesoins() != null ? new ArrayList<>(request.getBesoins()) : new ArrayList<>())
+                .solution(request.getSolution())
+                .technologies(request.getTechnologies() != null ? new ArrayList<>(request.getTechnologies()) : new ArrayList<>())
+                .resultat(request.getResultat())
                 .images(imageUrls)
                 .publie(false) // Non publié par défaut
                 .build();
@@ -117,10 +128,21 @@ public class ProjetService {
         }
 
         projet.setTitre(request.getTitre());
+        projet.setSousTitre(request.getSousTitre());
+        projet.setCategorie(request.getCategorie());
+        projet.setService(request.getService());
+        projet.setClientName(request.getClientName());
         projet.setSecteur(request.getSecteur());
-        projet.setDescription(request.getDescription());
-        projet.setDate(request.getDate());
         projet.setLocalisation(request.getLocalisation());
+        projet.setLatitude(request.getLatitude());
+        projet.setLongitude(request.getLongitude());
+        projet.setStatus(request.getStatus());
+        projet.setOverview(request.getOverview());
+        projet.setContexte(request.getContexte());
+        projet.setBesoins(request.getBesoins() != null ? new ArrayList<>(request.getBesoins()) : new ArrayList<>());
+        projet.setSolution(request.getSolution());
+        projet.setTechnologies(request.getTechnologies() != null ? new ArrayList<>(request.getTechnologies()) : new ArrayList<>());
+        projet.setResultat(request.getResultat());
 
         if (!imageUrls.isEmpty()) {
             projet.setImages(imageUrls);
@@ -185,11 +207,22 @@ public class ProjetService {
         return ProjetResponse.builder()
                 .id(projet.getId())
                 .titre(projet.getTitre())
+                .sousTitre(projet.getSousTitre())
+                .categorie(projet.getCategorie())
+                .service(projet.getService())
+                .clientName(projet.getClientName())
                 .secteur(projet.getSecteur())
-                .description(projet.getDescription())
-                .date(projet.getDate())
-                .images(projet.getImages())
                 .localisation(projet.getLocalisation())
+                .latitude(projet.getLatitude())
+                .longitude(projet.getLongitude())
+                .status(projet.getStatus())
+                .overview(projet.getOverview())
+                .contexte(projet.getContexte())
+                .besoins(projet.getBesoins())
+                .solution(projet.getSolution())
+                .technologies(projet.getTechnologies())
+                .resultat(projet.getResultat())
+                .images(projet.getImages())
                 .publie(projet.isPublie())
                 .createdAt(projet.getCreatedAt())
                 .updatedAt(projet.getUpdatedAt())

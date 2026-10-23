@@ -1,95 +1,141 @@
 package com.compulec.backend.controller;
 
+import com.compulec.backend.dto.request.AcceptInvitationRequest;
 import com.compulec.backend.dto.request.ForgotPasswordRequest;
 import com.compulec.backend.dto.request.LoginRequest;
-import com.compulec.backend.dto.request.RegisterRequest;
+import com.compulec.backend.dto.request.MfaCodeRequest;
 import com.compulec.backend.dto.request.ResetPasswordRequest;
-import com.compulec.backend.dto.request.VerifyCodeRequest;
+import com.compulec.backend.dto.request.TokenRequest;
 import com.compulec.backend.dto.response.ApiResponse;
 import com.compulec.backend.dto.response.AuthResponse;
+import com.compulec.backend.dto.response.InvitationPreviewResponse;
+import com.compulec.backend.dto.response.MfaSetupResponse;
+import com.compulec.backend.security.RefreshTokenCookie;
 import com.compulec.backend.service.AuthService;
+import com.compulec.backend.service.InvitationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * Contrôleur REST pour l'authentification (Inscription Admin, Connexion, Mot de passe oublié).
+ * Contrôleur REST pour l'authentification : connexion en 2 étapes (mot de passe + 2FA),
+ * invitations, mot de passe oublié. Le refresh token circule uniquement dans un cookie HttpOnly.
+ *
+ * Il n'y a volontairement plus d'inscription publique (/auth/register) :
+ * le premier administrateur est créé au démarrage et les managers sont invités.
+ * Tous les jetons circulent dans le corps des requêtes, jamais dans l'URL.
  */
 @RestController
 @RequestMapping("/auth")
 @RequiredArgsConstructor
-@Tag(name = "Authentification", description = "Endpoints d'inscription Administrateur, connexion, et gestion du mot de passe oublié")
+@Tag(name = "Authentification", description = "Connexion, activation de compte par invitation et réinitialisation du mot de passe")
 public class AuthController {
 
     private final AuthService authService;
-
-    /**
-     * Inscription d'un Administrateur.
-     * POST /api/auth/register
-     */
-    @PostMapping("/register")
-    @Operation(summary = "Inscription Administrateur", description = "Créer un nouveau compte Administrateur (avec envoi d'e-mail de bienvenue)")
-    public ResponseEntity<ApiResponse<AuthResponse>> register(
-            @Valid @RequestBody RegisterRequest request) {
-        AuthResponse response = authService.register(request);
-        return ResponseEntity
-                .status(HttpStatus.CREATED)
-                .body(ApiResponse.success(response, "Compte Administrateur créé avec succès ! Un e-mail de bienvenue a été envoyé."));
-    }
+    private final InvitationService invitationService;
+    private final RefreshTokenCookie refreshTokenCookie;
 
     /**
      * Connexion d'un Administrateur ou Manager.
      * POST /api/auth/login
      */
     @PostMapping("/login")
-    @Operation(summary = "Connexion", description = "Se connecter avec email et mot de passe (vérifie que le compte est actif)")
+    @Operation(summary = "Connexion", description = "Vérifie email et mot de passe (verrouillage 15 min après 5 échecs). "
+            + "Sans 2FA : session ouverte + proposition facultative d'activer la 2FA. "
+            + "Avec 2FA : renvoie un mfa_token pour l'étape du code.")
     public ResponseEntity<ApiResponse<AuthResponse>> login(
             @Valid @RequestBody LoginRequest request) {
-        AuthResponse response = authService.login(request);
-        return ResponseEntity.ok(ApiResponse.success(response, "Connexion réussie !"));
+        AuthService.Session session = authService.login(request);
+        if (session.refreshToken() == null) {
+            return ResponseEntity.ok(ApiResponse.success(session.response(),
+                    "Mot de passe correct. Saisissez le code de votre application d'authentification."));
+        }
+        return withSession(session, "Connexion réussie !");
     }
 
     /**
-     * Mot de passe oublié - Étape 1 : Saisir l'email et envoyer le code.
+     * Connexion – étape 2 : code de l'application ou code de secours.
+     * POST /api/auth/mfa/verify
+     */
+    @PostMapping("/mfa/verify")
+    @Operation(summary = "Connexion – étape 2FA", description = "Valide le code TOTP (ou un code de secours) et ouvre la session")
+    public ResponseEntity<ApiResponse<AuthResponse>> verifyMfa(@Valid @RequestBody MfaCodeRequest request) {
+        return withSession(authService.verifyMfa(request.getMfaToken(), request.getCode()), "Connexion réussie !");
+    }
+
+    /**
+     * Première connexion : génère le QR code de la 2FA.
+     * POST /api/auth/mfa/setup
+     */
+    @PostMapping("/mfa/setup")
+    @Operation(summary = "Activer la 2FA – QR code", description = "Génère le secret à scanner avec l'application d'authentification")
+    public ResponseEntity<ApiResponse<MfaSetupResponse>> startMfaSetup(@Valid @RequestBody TokenRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(authService.startMfaSetup(request.getToken())));
+    }
+
+    /**
+     * Première connexion : confirme la 2FA avec un premier code, ouvre la session et renvoie les codes de secours.
+     * POST /api/auth/mfa/setup/confirm
+     */
+    @PostMapping("/mfa/setup/confirm")
+    @Operation(summary = "Activer la 2FA – confirmation", description = "Confirme avec un premier code ; renvoie les 10 codes de secours (une seule fois)")
+    public ResponseEntity<ApiResponse<AuthResponse>> confirmMfaSetup(@Valid @RequestBody MfaCodeRequest request) {
+        return withSession(authService.confirmMfaSetup(request.getMfaToken(), request.getCode()),
+                "Double authentification activée. Conservez vos codes de secours en lieu sûr.");
+    }
+
+    /**
+     * Vérifie un lien d'invitation avant d'afficher le formulaire d'activation.
+     * POST /api/auth/invitations/preview
+     */
+    @PostMapping("/invitations/preview")
+    @Operation(summary = "Vérifier une invitation", description = "Indique si le lien d'invitation est encore valide (prénom et e-mail masqué)")
+    public ResponseEntity<ApiResponse<InvitationPreviewResponse>> previewInvitation(
+            @Valid @RequestBody TokenRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(invitationService.preview(request.getToken())));
+    }
+
+    /**
+     * Accepte une invitation : lien + code d'activation + mot de passe choisi par le manager.
+     * POST /api/auth/invitations/accept
+     */
+    @PostMapping("/invitations/accept")
+    @Operation(summary = "Activer son compte", description = "Active le compte avec le jeton du lien, le code transmis par l'admin (5 essais) et le nouveau mot de passe")
+    public ResponseEntity<ApiResponse<Void>> acceptInvitation(
+            @Valid @RequestBody AcceptInvitationRequest request) {
+        invitationService.accept(request.getToken(), request.getCode(),
+                request.getPassword(), request.getConfirmPassword());
+        return ResponseEntity.ok(ApiResponse.success(null, "Votre compte est activé. Vous pouvez maintenant vous connecter."));
+    }
+
+    /**
+     * Mot de passe oublié : envoie un lien à usage unique (réponse identique que le compte existe ou non).
      * POST /api/auth/forgot-password
      */
     @PostMapping("/forgot-password")
-    @Operation(summary = "Mot de passe oublié - Étape 1", description = "Génère et envoie un code de vérification à 6 chiffres par e-mail")
+    @Operation(summary = "Mot de passe oublié", description = "Envoie un lien de réinitialisation valable 30 minutes")
     public ResponseEntity<ApiResponse<Void>> forgotPassword(
             @Valid @RequestBody ForgotPasswordRequest request) {
         authService.forgotPassword(request);
-        return ResponseEntity.ok(ApiResponse.success(null, "Un code de réinitialisation vous a été envoyé par e-mail."));
+        return ResponseEntity.ok(ApiResponse.success(null,
+                "Si un compte actif correspond à cette adresse, un lien de réinitialisation vient d'y être envoyé."));
     }
 
     /**
-     * Mot de passe oublié - Étape 2 : Confirmer le code de vérification.
-     * POST /api/auth/verify-reset-code
-     */
-    @PostMapping("/verify-reset-code")
-    @Operation(summary = "Mot de passe oublié - Étape 2", description = "Vérifie la validité du code de réinitialisation reçu et retourne un jeton temporaire")
-    public ResponseEntity<ApiResponse<AuthResponse>> verifyResetCode(
-            @Valid @RequestBody VerifyCodeRequest request) {
-        AuthResponse response = authService.verifyResetCode(request);
-        return ResponseEntity.ok(ApiResponse.success(response, "Code de vérification validé. Jeton temporaire généré."));
-    }
-
-    /**
-     * Mot de passe oublié - Étape 3 : Réinitialiser le mot de passe.
+     * Réinitialise le mot de passe avec le jeton du lien reçu par e-mail.
      * POST /api/auth/reset-password
      */
     @PostMapping("/reset-password")
-    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Mot de passe oublié - Étape 3", description = "Réinitialise le mot de passe de l'utilisateur authentifié par le jeton temporaire")
+    @Operation(summary = "Réinitialiser le mot de passe", description = "Définit un nouveau mot de passe à partir du lien reçu par e-mail ; toutes les sessions sont fermées")
     public ResponseEntity<ApiResponse<Void>> resetPassword(
-            @Valid @RequestBody ResetPasswordRequest request,
-            @AuthenticationPrincipal UserDetails userDetails) {
-        authService.resetPassword(request, userDetails);
+            @Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
         return ResponseEntity.ok(ApiResponse.success(null, "Votre mot de passe a été réinitialisé avec succès !"));
     }
 
@@ -98,11 +144,10 @@ public class AuthController {
      * POST /api/auth/refresh-token
      */
     @PostMapping("/refresh-token")
-    @Operation(summary = "Renouveler le token", description = "Obtenir un nouvel access token via le refresh token")
+    @Operation(summary = "Renouveler le token", description = "Nouvel access token à partir du cookie HttpOnly (rotation du refresh token)")
     public ResponseEntity<ApiResponse<AuthResponse>> refreshToken(
-            @RequestParam String refreshToken) {
-        AuthResponse response = authService.refreshToken(refreshToken);
-        return ResponseEntity.ok(ApiResponse.success(response, "Token renouvelé avec succès"));
+            @CookieValue(name = RefreshTokenCookie.NAME, required = false) String refreshToken) {
+        return withSession(authService.refreshToken(refreshToken), "Token renouvelé avec succès");
     }
 
     /**
@@ -110,10 +155,19 @@ public class AuthController {
      * POST /api/auth/logout
      */
     @PostMapping("/logout")
-    @Operation(summary = "Déconnexion", description = "Révoquer tous les tokens de l'utilisateur connecté")
+    @Operation(summary = "Déconnexion", description = "Révoque la session (cookie) et efface le cookie, même si l'access token a expiré")
     public ResponseEntity<ApiResponse<Void>> logout(
+            @CookieValue(name = RefreshTokenCookie.NAME, required = false) String refreshToken,
             @AuthenticationPrincipal UserDetails userDetails) {
-        authService.logout(userDetails.getUsername());
-        return ResponseEntity.ok(ApiResponse.success(null, "Déconnexion réussie"));
+        authService.logout(refreshToken, userDetails != null ? userDetails.getUsername() : null);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.clear())
+                .body(ApiResponse.success(null, "Déconnexion réussie"));
+    }
+
+    private ResponseEntity<ApiResponse<AuthResponse>> withSession(AuthService.Session session, String message) {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.create(session.refreshToken()))
+                .body(ApiResponse.success(session.response(), message));
     }
 }
